@@ -47,17 +47,21 @@ fn get_max_value(values: Vec<u8>) -> u8 {
 
 fn main() {
     let lines = read_input_file();
-    let mut sum = 0;
+    let mut sum_of_ids = 0;
+    let mut sum_of_powers = 0;
     for line in lines {
         let (id, red, blue, green) = get_game_records(&line);
         let max_red_found = get_max_value(red);
         let max_blue_found = get_max_value(blue);
         let max_green_found = get_max_value(green);
 
+        sum_of_powers += max_red_found as u32 * max_green_found as u32 * max_blue_found as u32;
+
         if max_red_found > MAX_RED_PERMITTED || max_blue_found > MAX_BLUE_PERMITTED || max_green_found > MAX_GREEN_PERMITTED {
             continue;
         }
-        sum += id as u16;
+        sum_of_ids += id as u16;
     }
-    println!("{}", sum);
+    println!("sum of ids: {}", sum_of_ids);
+    println!("power of minimmum cubes: {}", sum_of_powers);
 }
