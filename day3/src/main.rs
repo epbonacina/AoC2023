@@ -1,6 +1,6 @@
 use std::fs;
 
-const INPUT_FILE_PATH: &str = "smaller_input.txt";
+const INPUT_FILE_PATH: &str = "input.txt";
 
 
 fn read_input_file() -> Vec<String> {
@@ -32,6 +32,11 @@ fn get_numbers_adjacent_to_symbols(lines: Vec<String>) -> Vec<i32>{
                 number.clear();
             }
         }
+        if found_relevant_number {
+            numbers_adjacent_to_symbols.push(number.clone().parse().unwrap());
+            found_relevant_number = false;
+        }
+        number.clear();
     }
     numbers_adjacent_to_symbols
 }
@@ -87,5 +92,10 @@ fn is_adjacent_to_symbol(x: usize, y: usize, lines: &Vec<String>) -> bool {
 fn main() {
     let lines = read_input_file();
     let numbers = get_numbers_adjacent_to_symbols(lines);
-    println!("{:?}", numbers);
+    let mut sum = 0;
+
+    for number in numbers {
+        sum += number;
+    }
+    println!("{:?}", sum);
 }
