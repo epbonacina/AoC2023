@@ -70,7 +70,7 @@ fn get_numbers_adjacent_to_symbol(x: usize, y: usize, lines: &Vec<String>, map: 
     for (candidate_y, candidate_x) in candidates_coords {
         if let Some(candidate_line) = map.get(candidate_y) {
             let digit_id = candidate_line[candidate_x];
-            if used_ids.contains(&digit_id) {
+            if used_ids.contains(&digit_id) || digit_id == 0 || digit_id == -1 {
                 continue;
             }
             let number = get_number_by_id(digit_id, lines, map);
