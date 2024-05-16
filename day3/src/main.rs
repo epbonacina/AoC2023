@@ -10,38 +10,50 @@ fn read_input_file() -> Vec<String> {
         .collect()
 }
 
-fn get_numbers_adjacent_to_symbols(lines: &Vec<String>) -> Vec<u32> {
-    let mut numbers_adjacent_to_symbols = Vec::new();
+fn build_map(lines: &Vec<String>) -> Vec<Vec<i32>> {
+    let mut id = 1;
+    let mut map = Vec::new();
+    let mut line_ids = Vec::new();
 
-    for (y, line) in lines.iter().enumerate() {
-        let mut tmp_number = String::new();
-        let mut found_a_relevant_number = false;
-
-        for (x, ch) in line.chars().enumerate() {
+    for line in lines {
+        for ch in line.chars() {
             match ch {
-                digit if ch.is_digit(10) && is_adjacent_to_symbol(&lines, x, y) => {
-                    tmp_number.push(digit);
-                    found_a_relevant_number = true;
-                }
-                digit if ch.is_digit(10) => tmp_number.push(digit),
-                _ if found_a_relevant_number => {
-                    numbers_adjacent_to_symbols.push(tmp_number.parse().unwrap());
-                    found_a_relevant_number = false;
-                    tmp_number.clear();
+                _ if ch.is_digit(10) => line_ids.push(id),
+                _ if ch == '.' => {
+                    line_ids.push(-1);
+                    id += 1;
                 }
                 _ => {
-                    tmp_number.clear();
+                    line_ids.push(0);
+                    id += 1;
                 }
             }
         }
-        if found_a_relevant_number {
-            numbers_adjacent_to_symbols.push(tmp_number.parse().unwrap());
+
+        map.push(line_ids.clone());
+        line_ids.clear();
+    }
+    map
+}
+
+fn get_numbers_adjacent_to_symbols(lines: &Vec<String>, map: &Vec<Vec<i32>>) -> Vec<(Vec<u32>, char)> {
+    let mut numbers_adjacent_to_symbols = Vec::new();
+    for (y, line) in map.iter().enumerate() {
+        for (x, id) in line.into_iter().enumerate() {
+            match id {
+                0 => {
+                    let numbers = get_numbers_adjacent_to_symbol(x, y, lines, map);
+                    let symbol = lines[y].chars().nth(x).unwrap();
+                    numbers_adjacent_to_symbols.push((numbers, symbol));
+                }
+                _ => {}
+            }
         }
     }
     numbers_adjacent_to_symbols
 }
 
-fn is_adjacent_to_symbol(lines: &Vec<String>, x: usize, y: usize) -> bool {
+fn get_numbers_adjacent_to_symbol(x: usize, y: usize, lines: &Vec<String>, map: &Vec<Vec<i32>>) -> Vec<u32> {
     let candidates_coords = [
         (y.wrapping_sub(1), x.wrapping_sub(1)),
         (y.wrapping_sub(1), x),
@@ -53,25 +65,52 @@ fn is_adjacent_to_symbol(lines: &Vec<String>, x: usize, y: usize) -> bool {
         (y.wrapping_add(1), x.wrapping_add(1)),
     ];
 
+    let mut numbers_adjacent_to_symbol = Vec::new();
+    let mut used_ids = Vec::new();
     for (candidate_y, candidate_x) in candidates_coords {
-        if let Some(line) = lines.get(candidate_y) {
-            if let Some(value) = line.chars().nth(candidate_x) {
-                if !value.is_digit(10) && value != '.' {
-                    return true;
-                }
+        if let Some(candidate_line) = map.get(candidate_y) {
+            let digit_id = candidate_line[candidate_x];
+            if used_ids.contains(&digit_id) {
+                continue;
+            }
+            let number = get_number_by_id(digit_id, lines, map);
+            used_ids.push(digit_id);
+            numbers_adjacent_to_symbol.push(number);
+        }
+    }
+    numbers_adjacent_to_symbol
+}
+
+fn get_number_by_id(target_id: i32, lines: &Vec<String>, map: &Vec<Vec<i32>>) -> u32 {
+    let mut number = String::new();
+
+    for (y, line) in lines.iter().enumerate() {
+        for (x, ch) in line.chars().enumerate() {
+            let line_id = map[y][x];
+            if line_id == target_id {
+                number.push(ch);
             }
         }
     }
-    return false;
+    number.parse().unwrap()
 }
 
 fn main() {
     let lines = read_input_file();
-    let numbers = get_numbers_adjacent_to_symbols(&lines);
-    let mut sum = 0;
+    let map = build_map(&lines);
+    let adjacent_numbers = get_numbers_adjacent_to_symbols(&lines, &map);
 
-    for number in numbers {
-        sum += number;
+    let mut gear_ratios_summed_up = 0;
+    for (numbers, symbol) in adjacent_numbers {
+        if symbol == '*' && numbers.len() == 2 {
+            gear_ratios_summed_up += numbers[0]*numbers[1];
+        }
     }
-    println!("{:?}", sum);
+    println!("Gear ratios summed up: {}", gear_ratios_summed_up);
 }
+
+
+
+
+
+
