@@ -1,6 +1,7 @@
 use std::fs;
 
 const INPUT_FILE_PATH: &str = "input.txt";
+// const INPUT_FILE_PATH: &str = "smaller_input.txt";
 
 fn read_input_file() -> Vec<String> {
     fs::read_to_string(INPUT_FILE_PATH)
@@ -29,14 +30,14 @@ fn build_map(lines: &Vec<String>) -> Vec<Vec<i32>> {
                 }
             }
         }
-
+        id += 1;
         map.push(line_ids.clone());
         line_ids.clear();
     }
     map
 }
 
-fn get_numbers_adjacent_to_symbols(lines: &Vec<String>, map: &Vec<Vec<i32>>) -> Vec<(Vec<u32>, char)> {
+fn get_numbers_adjacent_to_symbols(lines: &Vec<String>, map: &Vec<Vec<i32>>) -> Vec<(Vec<(i32, u32)>, char)> {
     let mut numbers_adjacent_to_symbols = Vec::new();
     for (y, line) in map.iter().enumerate() {
         for (x, id) in line.into_iter().enumerate() {
@@ -53,7 +54,7 @@ fn get_numbers_adjacent_to_symbols(lines: &Vec<String>, map: &Vec<Vec<i32>>) -> 
     numbers_adjacent_to_symbols
 }
 
-fn get_numbers_adjacent_to_symbol(x: usize, y: usize, lines: &Vec<String>, map: &Vec<Vec<i32>>) -> Vec<u32> {
+fn get_numbers_adjacent_to_symbol(x: usize, y: usize, lines: &Vec<String>, map: &Vec<Vec<i32>>) -> Vec<(i32, u32)> {
     let candidates_coords = [
         (y.wrapping_sub(1), x.wrapping_sub(1)),
         (y.wrapping_sub(1), x),
@@ -75,7 +76,7 @@ fn get_numbers_adjacent_to_symbol(x: usize, y: usize, lines: &Vec<String>, map: 
             }
             let number = get_number_by_id(digit_id, lines, map);
             used_ids.push(digit_id);
-            numbers_adjacent_to_symbol.push(number);
+            numbers_adjacent_to_symbol.push((digit_id, number));
         }
     }
     numbers_adjacent_to_symbol
@@ -100,17 +101,25 @@ fn main() {
     let map = build_map(&lines);
     let adjacent_numbers = get_numbers_adjacent_to_symbols(&lines, &map);
 
-    let mut gear_ratios_summed_up = 0;
+    let mut sum_of_the_gear_ratios = 0;
+    let mut sum_of_the_part_numbers = 0;
+    let mut used_ids = Vec::new();
+    let mut testing_something = 0;
     for (numbers, symbol) in adjacent_numbers {
         if symbol == '*' && numbers.len() == 2 {
-            gear_ratios_summed_up += numbers[0]*numbers[1];
+            sum_of_the_gear_ratios += numbers[0].1*numbers[1].1;
+        }
+        for (id, num) in numbers {
+            if !(used_ids.contains(&id)) {
+                sum_of_the_part_numbers += num;
+                used_ids.push(id);
+            }
+            else {
+                testing_something += num;
+            }
         }
     }
-    println!("Gear ratios summed up: {}", gear_ratios_summed_up);
+    println!("Sum of the gear ratios: {}", sum_of_the_gear_ratios);
+    println!("Sum of the part numbers: {}", sum_of_the_part_numbers);
+    println!("Test: {}", testing_something);
 }
-
-
-
-
-
-
