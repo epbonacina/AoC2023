@@ -4,15 +4,14 @@ use std::fs;
 const FILE_PATH: &str = "input.txt";
 // const FILE_PATH: &str = "smaller_input.txt";
 const SECTION_NAMES: [&str; 7] = [
-        "seed-to-soil map",
-        "soil-to-fertilizer map",
-        "fertilizer-to-water map",
-        "water-to-light map",
-        "light-to-temperature map",
-        "temperature-to-humidity map",
-        "humidity-to-location map",
-    ];
-
+    "seed-to-soil map",
+    "soil-to-fertilizer map",
+    "fertilizer-to-water map",
+    "water-to-light map",
+    "light-to-temperature map",
+    "temperature-to-humidity map",
+    "humidity-to-location map",
+];
 
 fn read_input() -> Vec<String> {
     fs::read_to_string(FILE_PATH)
@@ -30,6 +29,22 @@ fn get_seed_ids(lines: &Vec<String>) -> Vec<u64> {
         .split_whitespace()
         .map(|n| n.parse().unwrap())
         .collect()
+}
+
+fn get_seed_id_ranges(lines: &Vec<String>) -> Vec<std::ops::Range<u64>> {
+    let first_line: Vec<u64> = get_seed_ids(lines);
+
+    let indexes_of_range_starts  = (0..first_line.len()-1).step_by(2);
+    let indexes_of_range_lens = (1..first_line.len()).step_by(2);
+
+    let mut ranges = Vec::new();
+    for (index_of_range_start, index_of_range_len) in indexes_of_range_starts.zip(indexes_of_range_lens) {
+        let range_start = first_line[index_of_range_start];
+        let range_len = first_line[index_of_range_len];
+        ranges.push(range_start..(range_start+range_len));
+    }
+    
+    ranges
 }
 
 fn get_section_mappings(section_name: &str, sections: &Vec<String>) -> Vec<(u64, u64, u64)> {
@@ -61,7 +76,6 @@ fn get_section_by_name(section_name: &str, sections: &Vec<String>) -> String {
         .map(String::from)
         .collect()
 }
-
 
 fn find_seed_location(seed_id: u64, mappings: &HashMap<&str, Vec<(u64, u64, u64)>>) -> u64 {
     let mut next_key = seed_id;
@@ -102,12 +116,17 @@ fn main() {
         }
     }
     println!("{}", lowest_location);
+
+    let seed_id_ranges = get_seed_id_ranges(&sections);
+
+    let mut lowest_location = i64::MAX;
+    for seed_id_range in seed_id_ranges {
+        for seed_id in seed_id_range {
+            let location_number = find_seed_location(seed_id, &mappings_of_each_section);
+            if (location_number as i64) < lowest_location {
+                lowest_location = location_number as i64;
+            }
+        }
+    }
+    println!("{}", lowest_location);
 }
-
-
-
-
-
-
-
-
