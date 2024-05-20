@@ -22,7 +22,7 @@ fn read_input() -> Vec<String> {
         .collect::<Vec<String>>()
 }
 
-fn get_seed_ids(lines: &Vec<String>) -> Vec<u32> {
+fn get_seed_ids(lines: &Vec<String>) -> Vec<u64> {
     lines[0]
         .split_once(":")
         .unwrap()
@@ -32,7 +32,7 @@ fn get_seed_ids(lines: &Vec<String>) -> Vec<u32> {
         .collect()
 }
 
-fn get_section_mappings(section_name: &str, sections: &Vec<String>) -> HashMap<u32, u32> {
+fn get_section_mappings(section_name: &str, sections: &Vec<String>) -> Vec<(u64, u64, u64)> {
     let section = get_section_by_name(section_name, sections);
     let mappings = &section
         .split_once(":")
@@ -42,19 +42,16 @@ fn get_section_mappings(section_name: &str, sections: &Vec<String>) -> HashMap<u
         .filter(|s| !s.is_empty())
         .collect::<Vec<&str>>();
 
-    let mut resulting_map = HashMap::new();
+    let mut resulting_mappings = Vec::new();
     for mapping in mappings {
         let values: Vec<String> = mapping.split_whitespace().map(String::from).collect();
-        let dest_range_start: u32 = values[0].parse().unwrap();
-        let src_range_start: u32 = values[1].parse().unwrap();
-        let range_len: u32 = values[2].parse().unwrap();
-
-        for i in 0..range_len {
-            resulting_map.insert(src_range_start + i, dest_range_start + i);
-        }
+        let dest_range_start: u64 = values[0].parse().unwrap();
+        let src_range_start: u64 = values[1].parse().unwrap();
+        let range_len: u64 = values[2].parse().unwrap();
+        resulting_mappings.push((dest_range_start, src_range_start, range_len));
     }
 
-    resulting_map
+    resulting_mappings
 }
 
 fn get_section_by_name(section_name: &str, sections: &Vec<String>) -> String {
@@ -66,16 +63,25 @@ fn get_section_by_name(section_name: &str, sections: &Vec<String>) -> String {
 }
 
 
-fn find_seed_location(seed_id: u32, mappings: &HashMap<&str, HashMap<u32, u32>>) -> u32 {
-    let mut key = seed_id;
+fn find_seed_location(seed_id: u64, mappings: &HashMap<&str, Vec<(u64, u64, u64)>>) -> u64 {
+    let mut next_key = seed_id;
     for section in SECTION_NAMES {
         let mapping = mappings.get(section).unwrap();
-        match mapping.get(&key) {
-            Some(k) => key = *k,
-            None => {},
+        next_key = get_mapping_value(next_key, mapping);
+    }
+    next_key
+}
+
+fn get_mapping_value(key: u64, mapping: &Vec<(u64, u64, u64)>) -> u64 {
+    let mut result = key;
+    for map in mapping {
+        let (dest_range_start, src_range_start, range_len) = map;
+
+        if key >= *src_range_start && key < src_range_start + range_len {
+            result = key - src_range_start + dest_range_start;
         }
     }
-    key
+    result
 }
 
 fn main() {
@@ -88,11 +94,11 @@ fn main() {
         mappings_of_each_section.insert(section_name, mappings);
     }
 
-    let mut lowest_location = i32::MAX;
+    let mut lowest_location = i64::MAX;
     for seed_id in seed_ids {
         let location_number = find_seed_location(seed_id, &mappings_of_each_section);
-        if (location_number as i32) < lowest_location {
-            lowest_location = location_number as i32;
+        if (location_number as i64) < lowest_location {
+            lowest_location = location_number as i64;
         }
     }
     println!("{}", lowest_location);
