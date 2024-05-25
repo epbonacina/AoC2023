@@ -1,9 +1,13 @@
+use std::cmp;
 use std::collections::HashMap;
 use std::fs;
 
 const FILE_PATH: &str = "input.txt";
 // const FILE_PATH: &str = "smaller_input.txt";
-const SECTION_NAMES: [&str; 7] = [
+
+const SEED_SECTION_NAME: &str = "seeds";
+const SECTION_NAMES: [&str; 8] = [
+    SEED_SECTION_NAME,
     "seed-to-soil map",
     "soil-to-fertilizer map",
     "fertilizer-to-water map",
@@ -13,120 +17,293 @@ const SECTION_NAMES: [&str; 7] = [
     "humidity-to-location map",
 ];
 
-fn read_input() -> Vec<String> {
+fn read_input_file() -> Vec<(String, String)> {
     fs::read_to_string(FILE_PATH)
-        .expect("Couldn't read input file")
+        .unwrap()
         .split("\n\n")
-        .map(String::from)
-        .collect::<Vec<String>>()
-}
-
-fn get_seed_ids(lines: &Vec<String>) -> Vec<u64> {
-    lines[0]
-        .split_once(":")
-        .unwrap()
-        .1
-        .split_whitespace()
-        .map(|n| n.parse().unwrap())
+        .zip(SECTION_NAMES)
+        .map(|(s, n)| (s.to_string(), n.to_string()))
         .collect()
 }
 
-fn get_seed_id_ranges(lines: &Vec<String>) -> Vec<std::ops::Range<u64>> {
-    let first_line: Vec<u64> = get_seed_ids(lines);
-
-    let indexes_of_range_starts  = (0..first_line.len()-1).step_by(2);
-    let indexes_of_range_lens = (1..first_line.len()).step_by(2);
-
-    let mut ranges = Vec::new();
-    for (index_of_range_start, index_of_range_len) in indexes_of_range_starts.zip(indexes_of_range_lens) {
-        let range_start = first_line[index_of_range_start];
-        let range_len = first_line[index_of_range_len];
-        ranges.push(range_start..(range_start+range_len));
-    }
-    
-    ranges
+#[derive(Clone, Debug)]
+struct RangeMap {
+    src_start: u64,
+    dst_start: u64,
+    length: u64,
 }
 
-fn get_section_mappings(section_name: &str, sections: &Vec<String>) -> Vec<(u64, u64, u64)> {
-    let section = get_section_by_name(section_name, sections);
-    let mappings = &section
-        .split_once(":")
-        .unwrap()
-        .1
-        .split("\n")
-        .filter(|s| !s.is_empty())
-        .collect::<Vec<&str>>();
-
-    let mut resulting_mappings = Vec::new();
-    for mapping in mappings {
-        let values: Vec<String> = mapping.split_whitespace().map(String::from).collect();
-        let dest_range_start: u64 = values[0].parse().unwrap();
-        let src_range_start: u64 = values[1].parse().unwrap();
-        let range_len: u64 = values[2].parse().unwrap();
-        resulting_mappings.push((dest_range_start, src_range_start, range_len));
+impl RangeMap {
+    fn dst_end(&self) -> u64 {
+        self.dst_start + self.length
     }
 
-    resulting_mappings
-}
-
-fn get_section_by_name(section_name: &str, sections: &Vec<String>) -> String {
-    sections
-        .iter()
-        .filter(|s| s.contains(section_name))
-        .map(String::from)
-        .collect()
-}
-
-fn find_seed_location(seed_id: u64, mappings: &HashMap<&str, Vec<(u64, u64, u64)>>) -> u64 {
-    let mut next_key = seed_id;
-    for section in SECTION_NAMES {
-        let mapping = mappings.get(section).unwrap();
-        next_key = get_mapping_value(next_key, mapping);
+    fn src_end(&self) -> u64 {
+        self.src_start + self.length
     }
-    next_key
-}
 
-fn get_mapping_value(key: u64, mapping: &Vec<(u64, u64, u64)>) -> u64 {
-    let mut result = key;
-    for map in mapping {
-        let (dest_range_start, src_range_start, range_len) = map;
+    fn dst_fits_in(&self, other: &RangeMap) -> bool {
+        self.dst_starts_within(other) && self.dst_ends_within(other)
+    }
 
-        if key >= *src_range_start && key < src_range_start + range_len {
-            result = key - src_range_start + dest_range_start;
+    fn dst_starts_within(&self, other: &RangeMap) -> bool {
+        self.dst_start >= other.src_start && self.dst_start <= other.src_end()
+    }
+
+    fn dst_ends_within(&self, other: &RangeMap) -> bool {
+        self.dst_end() >= other.src_start && self.dst_end() <= other.src_end()
+    }
+
+    fn overlaps_with(&self, other: &RangeMap) -> bool {
+        self.src_end() > other.src_start && self.src_start < other.src_end()
+    }
+
+    fn is_inside(&self, other: &RangeMap) -> bool {
+        other.src_end() > self.src_end() && other.src_start <= self.src_start
+    }
+
+    fn equals(&self, other: &RangeMap) -> bool {
+        self.dst_start == other.dst_start
+            && self.src_start == other.src_start
+            && self.length == other.length
+    }
+
+    fn merge(&self, other: &RangeMap) -> RangeMap {
+        RangeMap {
+            src_start: self.src_start,
+            dst_start: other.dst_start,
+            length: self.length,
         }
+    }
+
+    fn cut(&self, length: &u64) -> (RangeMap, RangeMap) {
+        let new_rangemap = RangeMap {
+            src_start: self.src_start,
+            dst_start: self.dst_start,
+            length: length.clone(),
+        };
+
+        let remaining_rangemap = RangeMap {
+            src_start: self.src_start + length,
+            dst_start: self.dst_start + length,
+            length: self.length - length,
+        };
+
+        (new_rangemap, remaining_rangemap)
+    }
+
+    fn intersection(&self, other: &RangeMap) -> Option<(RangeMap, RangeMap)> {
+        let dst_start = cmp::max(self.dst_start, other.src_start);
+        let src_start = self.src_start + (dst_start - self.dst_start);
+        let dst_end = cmp::min(self.dst_end(), other.src_end());
+
+        let other_src_start = dst_start;
+        let other_dst_start = other.dst_start + (other_src_start - other.src_start);
+
+        if dst_end <= dst_start {
+            return None;
+        }
+
+        let length = dst_end - dst_start;
+
+        let left_range_map = RangeMap {
+            src_start,
+            dst_start,
+            length,
+        };
+
+        let right_range_map = RangeMap {
+            src_start: other_src_start,
+            dst_start: other_dst_start,
+            length,
+        };
+
+        Some((left_range_map, right_range_map))
+    }
+
+    fn difference(&self, other: &RangeMap) -> Vec<RangeMap> {
+        if !self.overlaps_with(other) {
+            return vec![self.clone()];
+        }
+
+        let mut result = Vec::new();
+
+        if self.src_start < other.src_start {
+            result.push(RangeMap {
+                src_start: self.src_start,
+                dst_start: self.dst_start,
+                length: other.src_start - self.src_start,
+            });
+        }
+
+        if self.src_end() > other.src_end() {
+            result.push(RangeMap {
+                src_start: other.src_end(),
+                dst_start: self.dst_start + (other.src_end() - self.src_start),
+                length: self.src_end() - other.src_end(),
+            });
+        }
+
+        result
+    }
+}
+
+#[derive(Clone, Debug)]
+struct RangeSet {
+    range_maps: Vec<RangeMap>,
+}
+
+impl RangeSet {
+    fn new() -> Self {
+        RangeSet {
+            range_maps: Vec::new(),
+        }
+    }
+
+    fn insert(&self, new_range_map: &RangeMap) -> RangeSet {
+        let mut overlaps = false;
+        let mut new_ranges = Vec::new();
+        for range_map in &self.range_maps {
+            if new_range_map.is_inside(range_map) {
+                return self.clone();
+            }
+            if range_map.overlaps_with(new_range_map) {
+                overlaps = true;
+                new_ranges.extend(range_map.difference(new_range_map));
+            }
+        }
+
+        let mut new_range_set = self.clone();
+        if overlaps {
+            for new_range in new_ranges {
+                new_range_set = new_range_set.insert(&new_range);
+            }
+        } else {
+            new_range_set.range_maps.push(new_range_map.clone());
+        }
+
+        new_range_set
+    }
+
+    fn intersection(&self, other: &RangeSet) -> (RangeSet, RangeSet) {
+        let mut intersection = RangeSet::new();
+        let mut other_intersection = RangeSet::new();
+
+        for range_map in &self.range_maps {
+            for other_range_map in &other.range_maps {
+                match range_map.intersection(&other_range_map) {
+                    None => {}
+                    Some((range, other_range)) => {
+                        intersection = intersection.insert(&range);
+                        other_intersection = other_intersection.insert(&other_range);
+                    }
+                }
+            }
+        }
+
+        (intersection, other_intersection)
+    }
+
+    fn update_intersection_with(&self, other: &RangeSet) -> RangeSet {
+        let mut result = RangeSet::new();
+        let (intersection, other_intersection) = self.intersection(other);
+
+        for (range_map, other_range_map) in intersection
+            .range_maps
+            .iter()
+            .zip(other_intersection.range_maps)
+        {
+            let new_range_map = range_map.merge(&other_range_map);
+            result = result.insert(&new_range_map);
+        }
+
+        for range_map in &self.range_maps {
+            result = result.insert(&range_map);
+        }
+
+        result
+    }
+
+    fn contains(&self, other_range_map: &RangeMap) -> bool {
+        self.range_maps
+            .iter()
+            .any(|range_map| other_range_map.dst_fits_in(&range_map))
+    }
+}
+
+fn get_seed_range_set(sections: &Vec<(String, String)>) -> RangeSet {
+    let mut result = RangeSet::new();
+    let sections: Vec<String> = sections.iter().map(|(s, _)| s.to_string()).collect();
+    let (_, line) = sections[0].split_once(":").unwrap();
+    let values: Vec<u64> = line
+        .split_whitespace()
+        .map(|i| i.parse().unwrap())
+        .collect();
+    for (i, value) in values.clone().into_iter().enumerate().step_by(2) {
+        let new_range_map = RangeMap {
+            dst_start: value,
+            src_start: value,
+            length: values[i + 1],
+        };
+        result = result.insert(&new_range_map);
     }
     result
 }
 
-fn main() {
-    let sections = read_input();
-    let seed_ids = get_seed_ids(&sections);
-    let mut mappings_of_each_section = HashMap::new();
-
-    for section_name in SECTION_NAMES {
-        let mappings = get_section_mappings(&section_name, &sections);
-        mappings_of_each_section.insert(section_name, mappings);
+fn get_range_set(section: &str) -> RangeSet {
+    let mut result = RangeSet::new();
+    let lines = section.split("\n").filter(|s| !s.is_empty()).skip(1);
+    for line in lines {
+        let values: Vec<u64> = line
+            .split_whitespace()
+            .map(|i| i.parse().unwrap())
+            .collect();
+        let new_range_map = RangeMap {
+            dst_start: values[0],
+            src_start: values[1],
+            length: values[2],
+        };
+        result = result.insert(&new_range_map);
     }
-
-    let mut lowest_location = i64::MAX;
-    for seed_id in seed_ids {
-        let location_number = find_seed_location(seed_id, &mappings_of_each_section);
-        if (location_number as i64) < lowest_location {
-            lowest_location = location_number as i64;
-        }
-    }
-    println!("{}", lowest_location);
-
-    let seed_id_ranges = get_seed_id_ranges(&sections);
-
-    let mut lowest_location = i64::MAX;
-    for seed_id_range in seed_id_ranges {
-        for seed_id in seed_id_range {
-            let location_number = find_seed_location(seed_id, &mappings_of_each_section);
-            if (location_number as i64) < lowest_location {
-                lowest_location = location_number as i64;
-            }
-        }
-    }
-    println!("{}", lowest_location);
+    result
 }
+
+fn get_range_sets(sections: Vec<(String, String)>) -> HashMap<String, RangeSet> {
+    let mut range_sets = HashMap::new();
+
+    let seed_range_set = get_seed_range_set(&sections);
+    range_sets.insert(SEED_SECTION_NAME.to_string(), seed_range_set);
+
+    for (section, section_name) in sections.into_iter().skip(1) {
+        let range_set = get_range_set(&section);
+        range_sets.insert(section_name, range_set);
+    }
+
+    range_sets
+}
+
+fn main() {
+    let sections = read_input_file();
+    let range_sets = get_range_sets(sections);
+
+    let mut base_range_set = range_sets.get(SECTION_NAMES[0]).unwrap().clone();
+    for section_name in SECTION_NAMES.iter().skip(1) {
+        let next_range_set = range_sets.get(section_name.to_owned()).unwrap();
+        base_range_set = base_range_set.update_intersection_with(next_range_set);
+    }
+
+    let mut lowest_location = u64::MAX;
+    for range_map in base_range_set.range_maps {
+        let candidate = range_map.dst_start;
+        if candidate < lowest_location {
+            lowest_location = candidate;
+        }
+    }
+    println!("Lowest location: {}", lowest_location);
+}
+
+
+
+
+
+
