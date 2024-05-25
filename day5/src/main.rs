@@ -1,6 +1,7 @@
 use std::cmp;
 use std::collections::HashMap;
 use std::fs;
+use std::time::Instant;
 
 const FILE_PATH: &str = "input.txt";
 // const FILE_PATH: &str = "smaller_input.txt";
@@ -297,10 +298,12 @@ fn main() {
     let range_sets_pt1 = get_range_sets_for_pt1(&sections);
     let range_sets_pt2 = get_range_sets_for_pt2(&sections);
 
+    let before = Instant::now();
     let lowest_location_pt1 = get_lowest_location(range_sets_pt1);
     let lowest_location_pt2 = get_lowest_location(range_sets_pt2);
     println!("Lowest location for part one: {}", lowest_location_pt1);
     println!("Lowest location for part two: {}", lowest_location_pt2);
+    println!("Calculated in {:.2?}", before.elapsed());
 }
 
 
