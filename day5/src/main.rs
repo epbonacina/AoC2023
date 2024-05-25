@@ -42,18 +42,6 @@ impl RangeMap {
         self.src_start + self.length
     }
 
-    fn dst_fits_in(&self, other: &RangeMap) -> bool {
-        self.dst_starts_within(other) && self.dst_ends_within(other)
-    }
-
-    fn dst_starts_within(&self, other: &RangeMap) -> bool {
-        self.dst_start >= other.src_start && self.dst_start <= other.src_end()
-    }
-
-    fn dst_ends_within(&self, other: &RangeMap) -> bool {
-        self.dst_end() >= other.src_start && self.dst_end() <= other.src_end()
-    }
-
     fn overlaps_with(&self, other: &RangeMap) -> bool {
         self.src_end() > other.src_start && self.src_start < other.src_end()
     }
@@ -62,34 +50,12 @@ impl RangeMap {
         other.src_end() > self.src_end() && other.src_start <= self.src_start
     }
 
-    fn equals(&self, other: &RangeMap) -> bool {
-        self.dst_start == other.dst_start
-            && self.src_start == other.src_start
-            && self.length == other.length
-    }
-
     fn merge(&self, other: &RangeMap) -> RangeMap {
         RangeMap {
             src_start: self.src_start,
             dst_start: other.dst_start,
             length: self.length,
         }
-    }
-
-    fn cut(&self, length: &u64) -> (RangeMap, RangeMap) {
-        let new_rangemap = RangeMap {
-            src_start: self.src_start,
-            dst_start: self.dst_start,
-            length: length.clone(),
-        };
-
-        let remaining_rangemap = RangeMap {
-            src_start: self.src_start + length,
-            dst_start: self.dst_start + length,
-            length: self.length - length,
-        };
-
-        (new_rangemap, remaining_rangemap)
     }
 
     fn intersection(&self, other: &RangeMap) -> Option<(RangeMap, RangeMap)> {
@@ -223,12 +189,25 @@ impl RangeSet {
 
         result
     }
+}
 
-    fn contains(&self, other_range_map: &RangeMap) -> bool {
-        self.range_maps
-            .iter()
-            .any(|range_map| other_range_map.dst_fits_in(&range_map))
+fn get_seed_range_set_pt1(sections: &Vec<(String, String)>) -> RangeSet {
+    let mut result = RangeSet::new();
+    let sections: Vec<String> = sections.iter().map(|(s, _)| s.to_string()).collect();
+    let (_, line) = sections[0].split_once(":").unwrap();
+    let values: Vec<u64> = line
+        .split_whitespace()
+        .map(|i| i.parse().unwrap())
+        .collect();
+    for value in values {
+        let new_range_map = RangeMap {
+            dst_start: value,
+            src_start: value,
+            length: 1,
+        };
+        result = result.insert(&new_range_map);
     }
+    result
 }
 
 fn get_seed_range_set(sections: &Vec<(String, String)>) -> RangeSet {
@@ -268,7 +247,21 @@ fn get_range_set(section: &str) -> RangeSet {
     result
 }
 
-fn get_range_sets(sections: Vec<(String, String)>) -> HashMap<String, RangeSet> {
+fn get_range_sets_for_pt1(sections: &Vec<(String, String)>) -> HashMap<String, RangeSet> {
+    let mut range_sets = HashMap::new();
+
+    let seed_range_set = get_seed_range_set_pt1(&sections);
+    range_sets.insert(SEED_SECTION_NAME.to_string(), seed_range_set);
+
+    for (section, section_name) in sections.into_iter().skip(1) {
+        let range_set = get_range_set(&section);
+        range_sets.insert(section_name.to_string(), range_set);
+    }
+
+    range_sets
+}
+
+fn get_range_sets_for_pt2(sections: &Vec<(String, String)>) -> HashMap<String, RangeSet> {
     let mut range_sets = HashMap::new();
 
     let seed_range_set = get_seed_range_set(&sections);
@@ -276,16 +269,13 @@ fn get_range_sets(sections: Vec<(String, String)>) -> HashMap<String, RangeSet> 
 
     for (section, section_name) in sections.into_iter().skip(1) {
         let range_set = get_range_set(&section);
-        range_sets.insert(section_name, range_set);
+        range_sets.insert(section_name.to_string(), range_set);
     }
 
     range_sets
 }
 
-fn main() {
-    let sections = read_input_file();
-    let range_sets = get_range_sets(sections);
-
+fn get_lowest_location(range_sets: HashMap<String, RangeSet>) -> u64 {
     let mut base_range_set = range_sets.get(SECTION_NAMES[0]).unwrap().clone();
     for section_name in SECTION_NAMES.iter().skip(1) {
         let next_range_set = range_sets.get(section_name.to_owned()).unwrap();
@@ -299,7 +289,18 @@ fn main() {
             lowest_location = candidate;
         }
     }
-    println!("Lowest location: {}", lowest_location);
+    lowest_location
+}
+
+fn main() {
+    let sections = read_input_file();
+    let range_sets_pt1 = get_range_sets_for_pt1(&sections);
+    let range_sets_pt2 = get_range_sets_for_pt2(&sections);
+
+    let lowest_location_pt1 = get_lowest_location(range_sets_pt1);
+    let lowest_location_pt2 = get_lowest_location(range_sets_pt2);
+    println!("Lowest location for part one: {}", lowest_location_pt1);
+    println!("Lowest location for part two: {}", lowest_location_pt2);
 }
 
 
