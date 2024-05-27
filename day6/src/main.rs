@@ -1,10 +1,10 @@
 struct Race {
-    time: u32,
-    record_distance: u32,
+    time: u64,
+    record_distance: u64,
 }
 
 impl Race {
-    fn from(times: Vec<u32>, record_distances: Vec<u32>) -> Vec<Race> {
+    fn from(times: Vec<u64>, record_distances: Vec<u64>) -> Vec<Race> {
         let mut races = Vec::new();
         for (time, record_distance) in times.into_iter().zip(record_distances) {
             races.push(Race {
@@ -45,4 +45,14 @@ fn main() {
     let races = Race::from(times, distances);
     let ways = get_number_of_ways_i_could_beat_the_record(races);
     println!("Part one solution: {}", ways);
+
+    // let times = vec![71530];
+    // let distances = vec![940200];
+
+    let times = vec![59707878];
+    let distances = vec![430121812131276];
+
+    let races = Race::from(times, distances);
+    let ways = get_number_of_ways_i_could_beat_the_record(races);
+    println!("Part two solution: {}", ways);
 }
