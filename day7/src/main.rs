@@ -55,6 +55,7 @@ impl Hand {
 
 #[derive(Debug, PartialEq, PartialOrd, Eq, Ord, Hash, Clone)]
 enum Card {
+    J,
     Two,
     Three,
     Four,
@@ -64,7 +65,6 @@ enum Card {
     Eight,
     Nine,
     T,
-    J,
     Q,
     K,
     A,
@@ -73,6 +73,7 @@ enum Card {
 impl Card {
     fn from(card: char) -> Card {
         match card {
+            'J' => Card::J,
             '2' => Card::Two,
             '3' => Card::Three,
             '4' => Card::Four,
@@ -82,7 +83,6 @@ impl Card {
             '8' => Card::Eight,
             '9' => Card::Nine,
             'T' => Card::T,
-            'J' => Card::J,
             'Q' => Card::Q,
             'K' => Card::K,
             'A' => Card::A,
@@ -105,54 +105,53 @@ enum HandType {
 impl HandType {
     fn from(cards: &[Card; 5]) -> HandType {
         let counts = HandType::_count(cards);
-        for (i, count) in counts.iter().enumerate() {
-            match count {
-                5 => return HandType::FiveOfAKind,
-                4 => return HandType::FourOfAKind,
-                3 => {
-                    if counts.contains(&2) {
-                        return HandType::FullHouse;
-                    }
-                    return HandType::ThreeOfAKind;
-                }
-                2 => {
-                    if counts[i + 1..].contains(&2) {
-                        return HandType::TwoPair;
-                    }
-                    return HandType::OnePair;
-                }
-                _ => {}
-            }
+        let mut hand_points = counts[0] * 2; // little trick
+
+        if (hand_points == 4 || hand_points == 6) && counts[1..].contains(&2) {
+            hand_points += 1;
         }
-        HandType::HighCard
+
+        hand_points += HandType::_count_j_cards(cards) * 2; //the same little trick
+
+        match hand_points {
+            2 => return HandType::HighCard,
+            3 => return HandType::HighCard,
+            4 => return HandType::OnePair,
+            5 => return HandType::TwoPair,
+            6 => return HandType::ThreeOfAKind,
+            7 => return HandType::FullHouse,
+            8 => return HandType::FourOfAKind,
+            9 => return HandType::FourOfAKind,
+            10 => return HandType::FiveOfAKind,
+            _ => panic!("Invalid hand"),
+        }
     }
 
     fn _count(cards: &[Card; 5]) -> [u8; 5] {
-        let mut counts = [0; 13]; // 13 possible ranks
+        let mut counts = [0u8; 13]; // 13 possible ranks
 
-        for card in cards {
+        for card in cards.iter().filter(|&card| card.clone() != Card::J) {
             counts[card.clone() as usize] += 1;
         }
 
-        // Only take the non-zero counts and sort them
-        let mut non_zero_counts: Vec<u8> = counts.iter().cloned().filter(|&count| count > 0).collect();
-        non_zero_counts.sort_unstable_by(|a, b| b.cmp(a)); // Sort in descending order
+        counts.sort_unstable_by(|a, b| b.cmp(a));
+        counts[..5].try_into().unwrap()
+    }
 
-        let mut result = [0; 5];
-        for (i, &count) in non_zero_counts.iter().enumerate() {
-            result[i] = count;
-        }
-
-        result
+    fn _count_j_cards(cards: &[Card; 5]) -> u8 {
+        cards.iter().fold(0, |acc, elem| match elem {
+            Card::J => acc + 1,
+            _ => acc,
+        })
     }
 }
 
 fn main() {
     let mut hands = read_input_file();
     hands.sort_by(|hand, other_hand| hand.clone().compare_to(&other_hand));
-    let total_winings = hands
+    let total_winnings = hands
         .iter()
         .enumerate()
         .fold(0, |acc, (idx, hand)| acc + (idx as u32 + 1) * hand.bid);
-    println!("{:?}", total_winings);
+    println!("{:?}", total_winnings);
 }
