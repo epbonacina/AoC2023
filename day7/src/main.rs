@@ -1,5 +1,4 @@
 use std::cmp::Ordering;
-use std::collections::HashMap;
 use std::fs;
 
 const FILE_PATH: &str = "input.txt";
@@ -105,13 +104,13 @@ enum HandType {
 impl HandType {
     fn from(cards: &[Card; 5]) -> HandType {
         let counts = HandType::_count(cards);
-        let mut hand_points = counts[0] * 2; // little trick
+        let mut hand_points = counts[0]*2; // little trick
 
         if (hand_points == 4 || hand_points == 6) && counts[1..].contains(&2) {
             hand_points += 1;
         }
 
-        hand_points += HandType::_count_j_cards(cards) * 2; //the same little trick
+        hand_points += HandType::_count_j_cards(cards)*2; //the same little trick
 
         match hand_points {
             2 => return HandType::HighCard,
@@ -123,7 +122,7 @@ impl HandType {
             8 => return HandType::FourOfAKind,
             9 => return HandType::FourOfAKind,
             10 => return HandType::FiveOfAKind,
-            _ => panic!("Invalid hand"),
+            _ => panic!("Invalid hand")
         }
     }
 
