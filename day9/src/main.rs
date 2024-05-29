@@ -33,12 +33,8 @@ fn extrapolate_backwards(values: &Vec<i64>) -> i64 {
 
 fn get_differences(values: &Vec<i64>) -> Vec<i64> {
     let mut new_values = Vec::new();
-    let mut iter = values.iter().enumerate().peekable();
-    while let Some((i, value)) = iter.next() {
-        if iter.peek().is_none() {
-            break;
-        }
-        new_values.push(values[i + 1] - value);
+    for i in 1..values.len() {
+        new_values.push(values[i] - values[i-1]);
     }
     new_values
 }
