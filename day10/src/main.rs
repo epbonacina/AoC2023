@@ -1,8 +1,8 @@
 use std::cmp;
 use std::fs;
 
-// const FILE_PATH: &str = "input.txt";
-const FILE_PATH: &str = "smaller_input.txt";
+const FILE_PATH: &str = "input.txt";
+// const FILE_PATH: &str = "smaller_input.txt";
 
 const ABOVE: usize = 0;
 const RIGHT: usize = 1;
@@ -17,7 +17,7 @@ enum Pipe {
     NorthWest,
     SouthEast,
     SouthWest,
-    WestEast,
+    EastWest,
     Obstructed,
 }
 
@@ -30,7 +30,7 @@ impl Pipe {
             'J' => Pipe::NorthWest,
             'F' => Pipe::SouthEast,
             '7' => Pipe::SouthWest,
-            '-' => Pipe::WestEast,
+            '-' => Pipe::EastWest,
             _ => Pipe::Obstructed,
         }
     }
@@ -46,6 +46,7 @@ struct Route {
 struct Navigator<'a> {
     route_matrix: &'a Vec<Vec<Route>>,
     current_route: &'a Route,
+    previous_route: &'a Route,
     initial_x: usize,
     initial_y: usize,
 }
@@ -55,6 +56,7 @@ impl<'a> Navigator<'a> {
         Navigator {
             route_matrix,
             current_route,
+            previous_route: current_route,
             initial_x: current_route.x,
             initial_y: current_route.y,
         }
@@ -64,8 +66,8 @@ impl<'a> Navigator<'a> {
         let x = self.current_route.x;
         let y = self.current_route.y;
         let candidates_pos = [
-            (x, cmp::min(y + 1, self.route_matrix.len()-1)),
-            (cmp::min(x + 1, self.route_matrix[0].len()-1), y),
+            (x, cmp::min(y + 1, self.route_matrix.len() - 1)),
+            (cmp::min(x + 1, self.route_matrix[0].len() - 1), y),
             (x, y.saturating_sub(1)),
             (x.saturating_sub(1), y),
         ];
@@ -77,33 +79,25 @@ impl<'a> Navigator<'a> {
         }; 4];
 
         let indexes = match self.current_route.pipe {
-            Pipe::Start => return &[ABOVE, RIGHT, BELLOW, LEFT],
-            Pipe::NorthSouth => return &[ABOVE, BELLOW],
-            Pipe::NorthEast => return &[ABOVE, RIGHT],
-            Pipe::NorthWest => return &[ABOVE, LEFT],
-            Pipe::SouthEast => return &[RIGHT, BELLOW],
-            Pipe::SouthWest => return &[BELLOW, LEFT],
-            Pipe::WestEast => return &[RIGHT, LEFT],
-            Pipe::Obstructed => return &[],
+            Pipe::Start => vec![ABOVE, RIGHT, BELLOW, LEFT],
+            Pipe::NorthSouth => vec![ABOVE, BELLOW],
+            Pipe::NorthEast => vec![ABOVE, RIGHT],
+            Pipe::NorthWest => vec![ABOVE, LEFT],
+            Pipe::SouthEast => vec![RIGHT, BELLOW],
+            Pipe::SouthWest => vec![BELLOW, LEFT],
+            Pipe::EastWest => vec![RIGHT, LEFT],
+            Pipe::Obstructed => Vec::new(),
         };
 
-        let neighbors = neighbors.iter().enumerate().filter(|elem| 
-
-        for (idx, (candidate_x, candidate_y)) in candidates_pos.into_iter().enumerate() {
-            if (candidate_x, candidate_y) != (self.current_route.x, self.current_route.y) {
-                neighbors[idx] = &self.route_matrix[candidate_y][candidate_x];
+        for i in 0..neighbors.len() {
+            if indexes.contains(&i) {
+                let (x, y) = candidates_pos[i];
+                if (x, y) != (self.current_route.x, self.current_route.y)
+                    && (x, y) != (self.previous_route.x, self.previous_route.y)
+                {
+                    neighbors[i] = &self.route_matrix[y][x];
+                }
             }
-        }
-
-        match self.current_route.pipe {
-            Pipe::Start => return neighbors,
-            Pipe::NorthSouth => return [neighbors[ABOVE], neighbors[BELLOW]],
-            Pipe::NorthEast => return [neighbors[ABOVE], neighbors[RIGHT]],
-            Pipe::NorthWest => ,
-            Pipe::SouthEast,
-            Pipe::SouthWest,
-            Pipe::WestEast,
-            Pipe::Obstructed,
         }
         neighbors
     }
@@ -120,17 +114,20 @@ impl<'a> Iterator for Navigator<'a> {
             (ABOVE, Pipe::SouthWest),
             (RIGHT, Pipe::NorthWest),
             (RIGHT, Pipe::SouthWest),
+            (RIGHT, Pipe::EastWest),
             (BELLOW, Pipe::NorthSouth),
             (BELLOW, Pipe::NorthEast),
             (BELLOW, Pipe::NorthWest),
             (LEFT, Pipe::NorthEast),
             (LEFT, Pipe::SouthEast),
+            (LEFT, Pipe::EastWest),
         ];
 
         for (i, neighbor) in neighbors.iter().enumerate() {
             if possible_connections.contains(&(i, neighbor.pipe))
                 && (neighbor.x, neighbor.y) != (self.initial_x, self.initial_y)
             {
+                self.previous_route = self.current_route;
                 self.current_route = neighbor;
                 return Some(neighbor);
             }
@@ -146,7 +143,7 @@ fn count_steps_to_farthest_pipe(route_matrix: &Vec<Vec<Route>>, starting_route: 
     for _pipe in navigator {
         steps += 1;
     }
-    steps / 2
+    steps / 2 + 1
 }
 
 fn find_starting_route(route_matrix: &Vec<Vec<Route>>) -> &Route {
@@ -180,9 +177,6 @@ fn read_input_file() -> Vec<Vec<Route>> {
 }
 
 fn main() {
-    // É preciso considerar não apenas os vizinhos, mas também a rota corrente. Se ela for um 'L',
-    // por exemplo, só devem ser considerados os nós acima e à direita. Ademais, não se deve revisitar a
-    // rota que antecedeu a atual.
     let route_matrix = read_input_file();
     let starting_position = find_starting_route(&route_matrix);
     let steps_to_farthest_pipe = count_steps_to_farthest_pipe(&route_matrix, starting_position);
