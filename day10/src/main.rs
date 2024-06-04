@@ -187,16 +187,23 @@ fn count_steps_to_farthest_pipe(route_matrix: &[Vec<Route>], starting_route: &Ro
     steps / 2 + 1
 }
 
-fn there_is_a_wall_above(
+fn there_is_a_wall_below(
     route: &Route,
     loop_routes: &HashMap<String, &Route>,
-    _route_matrix: &[Vec<Route>],
+    non_loop_routes: &HashMap<String, &Route>,
+    route_matrix: &[Vec<Route>],
+    routes_conditions: &mut Vec<Vec<i32>>,
 ) -> bool {
-    let ys = 0..route.y;
+    let ys = (0..route.y).rev();
     let mut found_a_east_pointing_pipe = false;
     let mut found_a_west_pointing_pipe = false;
     for y in ys {
         let key = get_key(route.x, y);
+        if let Some(_) = non_loop_routes.get(&key) {
+            if routes_conditions[y][route.x] == NOT_SURROUNDED {
+                return false;
+            }
+        }
         let candidate_route = match loop_routes.get(&key) {
             Some(value) => value,
             None => &&Route {
@@ -219,7 +226,9 @@ fn there_is_a_wall_above(
 fn there_is_a_wall_to_the_right(
     route: &Route,
     loop_routes: &HashMap<String, &Route>,
+    non_loop_routes: &HashMap<String, &Route>,
     route_matrix: &[Vec<Route>],
+    routes_conditions: &mut Vec<Vec<i32>>,
 ) -> bool {
     let xs = route.x..route_matrix[0].len();
 
@@ -227,6 +236,9 @@ fn there_is_a_wall_to_the_right(
     let mut found_a_south_pointing_pipe = false;
     for x in xs {
         let key = get_key(x, route.y);
+        if let Some(_) = non_loop_routes.get(&key) {
+            return false
+        }
         let candidate_route = match loop_routes.get(&key) {
             Some(value) => value,
             None => &&Route {
@@ -247,9 +259,10 @@ fn there_is_a_wall_to_the_right(
     found_a_north_pointing_pipe && found_a_south_pointing_pipe
 }
 
-fn there_is_a_wall_below(
+fn there_is_a_wall_above(
     route: &Route,
     loop_routes: &HashMap<String, &Route>,
+    non_loop_routes: &HashMap<String, &Route>,
     route_matrix: &[Vec<Route>],
 ) -> bool {
     let ys = route.y..route_matrix.len();
@@ -258,6 +271,9 @@ fn there_is_a_wall_below(
     let mut found_a_west_pointing_pipe = false;
     for y in ys {
         let key = get_key(route.x, y);
+        if let Some(_) = non_loop_routes.get(&key) {
+            return false
+        }
         let candidate_route = match loop_routes.get(&key) {
             Some(value) => value,
             None => &&Route {
@@ -281,6 +297,7 @@ fn there_is_a_wall_below(
 fn there_is_a_wall_to_the_left(
     route: &Route,
     loop_routes: &HashMap<String, &Route>,
+    non_loop_routes: &HashMap<String, &Route>,
     _route_matrix: &[Vec<Route>],
 ) -> bool {
     let xs = 0..route.x;
@@ -289,6 +306,9 @@ fn there_is_a_wall_to_the_left(
     let mut found_a_south_pointing_pipe = false;
     for x in xs {
         let key = get_key(x, route.y);
+        if let Some(_) = non_loop_routes.get(&key) {
+            return false
+        }
         let candidate_route = match loop_routes.get(&key) {
             Some(value) => value,
             None => &&Route {
@@ -299,8 +319,8 @@ fn there_is_a_wall_to_the_left(
         };
         match candidate_route.pipe {
             Pipe::NorthSouth => return true,
-            Pipe::NorthEast | Pipe::SouthEast => found_a_north_pointing_pipe = true,
-            Pipe::NorthWest | Pipe::SouthWest => found_a_south_pointing_pipe = true,
+            Pipe::NorthEast | Pipe::NorthWest => found_a_north_pointing_pipe = true,
+            Pipe::SouthEast | Pipe::SouthWest => found_a_south_pointing_pipe = true,
             _ => {}
         }
     }
@@ -310,12 +330,13 @@ fn there_is_a_wall_to_the_left(
 fn is_surrounded_by_walls(
     route: &Route,
     loop_routes: &HashMap<String, &Route>,
+    non_loop_routes: &HashMap<String, &Route>,
     route_matrix: &[Vec<Route>],
 ) -> bool {
-    there_is_a_wall_above(route, loop_routes, route_matrix)
-        && there_is_a_wall_to_the_right(route, loop_routes, route_matrix)
-        && there_is_a_wall_below(route, loop_routes, route_matrix)
-        && there_is_a_wall_to_the_left(route, loop_routes, route_matrix)
+    there_is_a_wall_above(route, loop_routes, non_loop_routes, route_matrix)
+        && there_is_a_wall_to_the_right(route, loop_routes, non_loop_routes, route_matrix)
+        && there_is_a_wall_below(route, loop_routes, non_loop_routes, route_matrix)
+        && there_is_a_wall_to_the_left(route, loop_routes, non_loop_routes, route_matrix)
 }
 
 fn reset_tiles_that_have_unsurrounded_neighbors(routes_conditions: &mut Vec<Vec<i32>>) {
@@ -380,8 +401,8 @@ fn count_tiles_inside_loop(route_matrix: &[Vec<Route>], starting_route: &Route) 
         .collect();
 
     let mut routes_conditions = vec![vec![-1; route_matrix[0].len()]; route_matrix.len()];
-    for (_, route) in non_loop_routes {
-        if is_surrounded_by_walls(route, &loop_routes, route_matrix) {
+    for (_, route) in &non_loop_routes {
+        if is_surrounded_by_walls(route, &loop_routes, &non_loop_routes, route_matrix, &routes_conditions) {
             routes_conditions[route.y][route.x] = SURROUNDED;
         } else {
             routes_conditions[route.y][route.x] = NOT_SURROUNDED;
@@ -389,6 +410,26 @@ fn count_tiles_inside_loop(route_matrix: &[Vec<Route>], starting_route: &Route) 
     }
 
     reset_tiles_that_have_unsurrounded_neighbors(&mut routes_conditions);
+    for (y, line) in routes_conditions.iter().enumerate().rev() {
+        for (x, condition) in line.iter().enumerate() {
+            if *condition == -1 {
+                let character = match route_matrix[y][x].pipe {
+                    Pipe::Start => 'S',
+                    Pipe::NorthSouth => '|',
+                    Pipe::NorthEast => 'L',
+                    Pipe::NorthWest => 'J',
+                    Pipe::SouthEast => 'F',
+                    Pipe::SouthWest => '7',
+                    Pipe::EastWest => '-',
+                    Pipe::Obstructed => '.',
+                };
+                print!("{}", character);
+            } else {
+                print!("{}", condition);
+            }
+        }
+        println!();
+    }
 
     let mut count = 0;
     for line in routes_conditions {
