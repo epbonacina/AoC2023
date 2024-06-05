@@ -1,16 +1,6 @@
-use std::cmp;
 use std::collections::HashMap;
 use std::fs;
 
-const FILE_PATH: &str = "input.txt";
-// const FILE_PATH: &str = "smaller_input.txt";
-// const FILE_PATH: &str = "smaller_input2.txt";
-// const FILE_PATH: &str = "smaller_input3.txt";
-// const FILE_PATH: &str = "smaller_input4.txt";
-
-const NOT_SURROUNDED: i32 = 0;
-const SURROUNDED: i32 = 1;
-const CHECKED: i32 = 2;
 
 #[derive(Debug, Clone, PartialEq)]
 enum Direction {
@@ -18,10 +8,20 @@ enum Direction {
     Right,
     Below,
     Left,
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum State {
+    NotChecked,
+    BeingChecked,
+    IsPartOfLoop,
+    Surrounded,
+    Free,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-enum Pipe {
+enum PipeType {
     Start,
     NorthSouth,
     NorthEast,
@@ -32,449 +32,238 @@ enum Pipe {
     Obstructed,
 }
 
-impl Pipe {
-    fn from(character: char) -> Pipe {
+impl PipeType {
+    fn from(character: char) -> PipeType {
         match character {
-            'S' => Pipe::Start,
-            '|' => Pipe::NorthSouth,
-            'L' => Pipe::NorthEast,
-            'J' => Pipe::NorthWest,
-            'F' => Pipe::SouthEast,
-            '7' => Pipe::SouthWest,
-            '-' => Pipe::EastWest,
-            _ => Pipe::Obstructed,
+            'S' => PipeType::Start,
+            '|' => PipeType::NorthSouth,
+            'L' => PipeType::NorthEast,
+            'J' => PipeType::NorthWest,
+            'F' => PipeType::SouthEast,
+            '7' => PipeType::SouthWest,
+            '-' => PipeType::EastWest,
+            _ => PipeType::Obstructed,
         }
     }
+}
+
+enum ConnectionError {
+    IncompatiblePipes,
+    NoAvailableConnections,
 }
 
 #[derive(Clone, Debug, PartialEq)]
-struct Route {
-    pipe: Pipe,
-    x: usize,
-    y: usize,
+struct Pipe {
+    pipe_type: PipeType,
+    x: i16,
+    y: i16,
+    state: State,
 }
 
-impl Route {
-    fn get_neighbors<'a>(&'a self, route_matrix: &'a [Vec<Route>]) -> Vec<(Direction, &Route)> {
-        let candidates_pos = [
-            (self.x, cmp::min(self.y + 1, route_matrix.len() - 1)),
-            (cmp::min(self.x + 1, route_matrix[0].len() - 1), self.y),
-            (self.x, self.y.saturating_sub(1)),
-            (self.x.saturating_sub(1), self.y),
-        ];
-
-        let mut directions = Vec::new();
-        for (i, (candidate_x, candidate_y)) in candidates_pos.into_iter().enumerate() {
-            if (candidate_x, candidate_y) != (self.x, self.y) {
-                let neighbor = &route_matrix[candidate_y][candidate_x];
-                let direction = match i {
-                    0 => (Direction::Above, neighbor),
-                    1 => (Direction::Right, neighbor),
-                    2 => (Direction::Below, neighbor),
-                    _ => (Direction::Left, neighbor),
-                };
-                directions.push(direction);
-            }
+impl Pipe {
+    fn new(pipe_type: PipeType, x: i16, y: i16) -> Pipe {
+        Pipe {
+            pipe_type,
+            x,
+            y,
+            state: State::NotChecked,
         }
-        directions
     }
 
-    fn is_connected_to(&self, other: &Route) -> bool {
-        let direction = match (other.x, other.y) {
+    fn is_connected_to(&self, other: &Pipe) -> bool {
+        let direction = self.get_direction_towards(other);
+        let connectable_directions = self.get_connectable_directions();
+        let other_direction = other.get_direction_towards(self);
+        let other_connectable_directions = other.get_connectable_directions();
+        connectable_directions.contains(&direction)
+            && other_connectable_directions.contains(&other_direction)
+    }
+
+    fn get_connectable_directions(&self) -> Vec<Direction> {
+        match self.pipe_type {
+            PipeType::Start => vec![
+                Direction::Above,
+                Direction::Right,
+                Direction::Below,
+                Direction::Left,
+            ],
+            PipeType::NorthSouth => vec![Direction::Above, Direction::Below],
+            PipeType::NorthEast => vec![Direction::Above, Direction::Right],
+            PipeType::NorthWest => vec![Direction::Above, Direction::Left],
+            PipeType::EastWest => vec![Direction::Right, Direction::Left],
+            PipeType::SouthEast => vec![Direction::Right, Direction::Below],
+            PipeType::SouthWest => vec![Direction::Below, Direction::Left],
+            PipeType::Obstructed => vec![],
+        }
+    }
+
+    fn get_direction_towards(&self, other: &Pipe) -> Direction {
+        match (other.x, other.y) {
             (x, y) if x == self.x && y == self.y + 1 => Direction::Above,
             (x, y) if x == self.x + 1 && y == self.y => Direction::Right,
             (x, y) if x == self.x && y == self.y - 1 => Direction::Below,
             (x, y) if x == self.x - 1 && y == self.y => Direction::Left,
-            _ => return false,
-        };
+            _ => Direction::Unknown,
+        }
+    }
 
-        let connectable_directions = self.get_connectable_directions();
-        if connectable_directions.contains(&direction) {
-            let relative_direction = match direction {
-                Direction::Above => Direction::Below,
-                Direction::Right => Direction::Left,
-                Direction::Below => Direction::Above,
-                Direction::Left => Direction::Right,
-            };
+    fn with_state(&self, new_state: State) -> Pipe {
+        let mut pipe = self.clone();
+        pipe.state = new_state;
+        pipe
+    }
+}
 
-            if other
-                .get_connectable_directions()
-                .contains(&relative_direction)
-            {
-                return true;
+#[derive(Clone, Debug)]
+struct Plumping {
+    pipes: HashMap<String, Pipe>,
+}
+
+impl Plumping {
+    fn new() -> Plumping {
+        Plumping {
+            pipes: HashMap::new(),
+        }
+    }
+
+    fn insert(&mut self, pipe: Pipe) {
+        let key = Plumping::make_key_for(pipe.x, pipe.y);
+        self.pipes.insert(key, pipe);
+    }
+
+    fn make_key_for(x: i16, y: i16) -> String {
+        format!("x={},y={}", x, y)
+    }
+
+    fn get_neighbors_of(&self, pipe: &Pipe) -> Vec<&Pipe> {
+        let (x, y) = (pipe.x, pipe.y);
+        let neighbors_coords = [(x, y + 1), (x + 1, y), (x, y - 1), (x - 1, y)];
+
+        let mut neighbors = Vec::new();
+        for (ix, iy) in neighbors_coords {
+            let key = Plumping::make_key_for(ix, iy);
+            if let Some(pipe) = self.pipes.get(&key) {
+                neighbors.push(pipe)
             }
         }
-        false
+        neighbors
     }
 
-    fn get_connectable_directions(&self) -> Vec<Direction> {
-        let directions = HashMap::from([
-            (
-                Pipe::Start,
-                vec![
-                    Direction::Above,
-                    Direction::Right,
-                    Direction::Below,
-                    Direction::Left,
-                ],
-            ),
-            (Pipe::NorthSouth, vec![Direction::Above, Direction::Below]),
-            (Pipe::NorthEast, vec![Direction::Above, Direction::Right]),
-            (Pipe::NorthWest, vec![Direction::Above, Direction::Left]),
-            (Pipe::EastWest, vec![Direction::Right, Direction::Left]),
-            (Pipe::SouthEast, vec![Direction::Right, Direction::Below]),
-            (Pipe::SouthWest, vec![Direction::Below, Direction::Left]),
-            (Pipe::Obstructed, vec![]),
-        ]);
-        directions.get(&self.pipe).unwrap().to_vec()
+    fn get_connected_neighbors_of(&self, pipe: &Pipe) -> Vec<&Pipe> {
+        let neighbors = self.get_neighbors_of(pipe);
+        neighbors
+            .into_iter()
+            .filter(|neighbor| pipe.is_connected_to(neighbor))
+            .collect()
     }
-}
 
-struct Navigator<'a> {
-    route_matrix: &'a [Vec<Route>],
-    current_route: &'a Route,
-    previous_route: &'a Route,
-    initial_x: usize,
-    initial_y: usize,
-}
-
-impl<'a> Navigator<'a> {
-    fn new(route_matrix: &'a [Vec<Route>], current_route: &'a Route) -> Navigator<'a> {
-        Navigator {
-            route_matrix,
-            current_route,
-            previous_route: current_route,
-            initial_x: current_route.x,
-            initial_y: current_route.y,
+    fn set_state_of(&mut self, pipe: &Pipe, new_state: State) {
+        let key = Plumping::make_key_for(pipe.x, pipe.y);
+        if let Some(pipe) = self.pipes.get(&key) {
+            let new_pipe = pipe.with_state(new_state);
+            self.insert(new_pipe)
         }
     }
+}
 
-    fn get_connected_neighbors(&self) -> Vec<Route> {
-        let neighbors = self.current_route.get_neighbors(self.route_matrix);
-        let connected_neighbors = neighbors
-            .into_iter()
-            .filter(|(_, neighbor)| self.current_route.is_connected_to(neighbor))
-            .map(|(_, neighbor)| neighbor.clone());
-        connected_neighbors.collect()
+struct PlumpingNavigator<'a> {
+    plumping: &'a Plumping,
+    starting_pipe: &'a Pipe,
+    current_pipe: &'a Pipe,
+    previous_pipe: &'a Pipe,
+}
+
+impl<'a> PlumpingNavigator<'a> {
+    fn new(plumping: &'a Plumping, starting_pipe: &'a Pipe) -> PlumpingNavigator<'a> {
+        PlumpingNavigator {
+            plumping,
+            starting_pipe,
+            current_pipe: starting_pipe,
+            previous_pipe: starting_pipe,
+        }
     }
 }
 
-impl<'a> Iterator for Navigator<'a> {
-    type Item = &'a Route;
+impl<'a> Iterator for PlumpingNavigator<'a> {
+    type Item = &'a Pipe;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let neighbors = self.get_connected_neighbors();
-        for neighbor in neighbors.iter() {
-            if (neighbor.x, neighbor.y) != (self.initial_x, self.initial_y)
-                && neighbor != self.previous_route
-            {
-                self.previous_route = self.current_route;
-                self.current_route = &self.route_matrix[neighbor.y][neighbor.x];
-                return Some(self.current_route);
+        let neighbors = self.plumping.get_connected_neighbors_of(self.current_pipe);
+        for neighbor in neighbors {
+            if neighbor != self.starting_pipe && neighbor != self.previous_pipe {
+                self.previous_pipe = self.current_pipe;
+                self.current_pipe = neighbor;
+                return Some(self.current_pipe);
             }
         }
         None
     }
 }
 
-fn count_steps_to_farthest_pipe(route_matrix: &[Vec<Route>], starting_route: &Route) -> u32 {
-    let navigator = Navigator::new(route_matrix, starting_route);
+fn main() {
+    const FILE_PATH: &str = "input.txt";
+    // const FILE_PATH: &str = "smaller_input.txt";
+    // const FILE_PATH: &str = "smaller_input2.txt";
+    // const FILE_PATH: &str = "smaller_input3.txt";
+    // const FILE_PATH: &str = "smaller_input4.txt";
+
+    let plumping = read_input_file(FILE_PATH);
+    let starting_pipe = find_starting_pipe(&plumping);
+    let steps_to_farthest_pipe = count_steps_to_farthest_pipe(plumping.clone(), starting_pipe);
+    let tiles_inside_loop = count_pipes_surrounded_by_loop(plumping.clone(), starting_pipe);
+    println!("Starting position: {:?}", starting_pipe);
+    println!("Steps to farthest pipe: {:?}", steps_to_farthest_pipe);
+    println!("Tiles inside loop: {:?}", tiles_inside_loop);
+}
+
+fn read_input_file(file_path: &str) -> Plumping {
+    let contents = fs::read_to_string(file_path).expect("Couldn't read input file");
+    let lines = contents.lines().rev();
+
+    let mut plumping = Plumping::new();
+    for (y, line) in lines.enumerate() {
+        for (x, ch) in line.chars().enumerate() {
+            let pipe_type = PipeType::from(ch);
+            let pipe = Pipe::new(pipe_type, x as i16, y as i16);
+            plumping.insert(pipe);
+        }
+    }
+    plumping
+}
+
+fn find_starting_pipe(plumping: &Plumping) -> &Pipe {
+    plumping
+        .pipes
+        .values()
+        .find(|&pipe| pipe.pipe_type == PipeType::Start)
+        .expect("Couldn't find starting pipe")
+}
+
+fn count_steps_to_farthest_pipe(plumping: Plumping, starting_pipe: &Pipe) -> u32 {
+    let pipes = PlumpingNavigator::new(&plumping, starting_pipe);
 
     let mut steps = 0;
-    for _pipe in navigator {
+    for _pipe in pipes {
         steps += 1;
     }
     steps / 2 + 1
 }
 
-fn there_is_a_wall_below(
-    route: &Route,
-    loop_routes: &HashMap<String, &Route>,
-    non_loop_routes: &HashMap<String, &Route>,
-    route_matrix: &[Vec<Route>],
-    routes_conditions: &mut Vec<Vec<i32>>,
-) -> bool {
-    let ys = (0..route.y).rev();
-    let mut found_a_east_pointing_pipe = false;
-    let mut found_a_west_pointing_pipe = false;
-    for y in ys {
-        let key = get_key(route.x, y);
-        if let Some(_) = non_loop_routes.get(&key) {
-            if routes_conditions[y][route.x] == NOT_SURROUNDED {
-                return false;
-            }
-        }
-        let candidate_route = match loop_routes.get(&key) {
-            Some(value) => value,
-            None => &&Route {
-                pipe: Pipe::Obstructed,
-                x: 0,
-                y: 0,
-            },
-        };
+fn count_pipes_surrounded_by_loop(mut plumping: Plumping, starting_pipe: &Pipe) -> u32 {
+    // After an extensive analysis, I discovered that the loop 
+    // bifurcates the map into two distinct sections: free and 
+    // surrounded. If a pipe contacts the loop on either side, 
+    // it can be classified as either free or surrounded. The 
+    // primary challenge lies in determining on which side of 
+    // the loop the pipe resides.
+    
+    let mut surrounded_side = Direction::Right; 
+    let loop_pipes = PlumpingNavigator::new(&plumping, starting_pipe).peekable();
 
-        match candidate_route.pipe {
-            Pipe::EastWest => return true,
-            Pipe::NorthEast | Pipe::SouthEast => found_a_east_pointing_pipe = true,
-            Pipe::NorthWest | Pipe::SouthWest => found_a_west_pointing_pipe = true,
-            _ => {}
-        }
-    }
-    found_a_east_pointing_pipe && found_a_west_pointing_pipe
 }
 
-fn there_is_a_wall_to_the_right(
-    route: &Route,
-    loop_routes: &HashMap<String, &Route>,
-    non_loop_routes: &HashMap<String, &Route>,
-    route_matrix: &[Vec<Route>],
-    routes_conditions: &mut Vec<Vec<i32>>,
-) -> bool {
-    let xs = route.x..route_matrix[0].len();
 
-    let mut found_a_north_pointing_pipe = false;
-    let mut found_a_south_pointing_pipe = false;
-    for x in xs {
-        let key = get_key(x, route.y);
-        if let Some(_) = non_loop_routes.get(&key) {
-            return false
-        }
-        let candidate_route = match loop_routes.get(&key) {
-            Some(value) => value,
-            None => &&Route {
-                pipe: Pipe::Obstructed,
-                x: 0,
-                y: 0,
-            },
-        };
-        match candidate_route.pipe {
-            Pipe::NorthSouth => {
-                return true;
-            }
-            Pipe::NorthEast | Pipe::NorthWest => found_a_north_pointing_pipe = true,
-            Pipe::SouthEast | Pipe::SouthWest => found_a_south_pointing_pipe = true,
-            _ => {}
-        }
-    }
-    found_a_north_pointing_pipe && found_a_south_pointing_pipe
-}
 
-fn there_is_a_wall_above(
-    route: &Route,
-    loop_routes: &HashMap<String, &Route>,
-    non_loop_routes: &HashMap<String, &Route>,
-    route_matrix: &[Vec<Route>],
-) -> bool {
-    let ys = route.y..route_matrix.len();
 
-    let mut found_a_east_pointing_pipe = false;
-    let mut found_a_west_pointing_pipe = false;
-    for y in ys {
-        let key = get_key(route.x, y);
-        if let Some(_) = non_loop_routes.get(&key) {
-            return false
-        }
-        let candidate_route = match loop_routes.get(&key) {
-            Some(value) => value,
-            None => &&Route {
-                pipe: Pipe::Obstructed,
-                x: 0,
-                y: 0,
-            },
-        };
-        match candidate_route.pipe {
-            Pipe::EastWest => {
-                return true;
-            }
-            Pipe::NorthEast | Pipe::SouthEast => found_a_east_pointing_pipe = true,
-            Pipe::NorthWest | Pipe::SouthWest => found_a_west_pointing_pipe = true,
-            _ => {}
-        }
-    }
-    found_a_east_pointing_pipe && found_a_west_pointing_pipe
-}
 
-fn there_is_a_wall_to_the_left(
-    route: &Route,
-    loop_routes: &HashMap<String, &Route>,
-    non_loop_routes: &HashMap<String, &Route>,
-    _route_matrix: &[Vec<Route>],
-) -> bool {
-    let xs = 0..route.x;
 
-    let mut found_a_north_pointing_pipe = false;
-    let mut found_a_south_pointing_pipe = false;
-    for x in xs {
-        let key = get_key(x, route.y);
-        if let Some(_) = non_loop_routes.get(&key) {
-            return false
-        }
-        let candidate_route = match loop_routes.get(&key) {
-            Some(value) => value,
-            None => &&Route {
-                pipe: Pipe::Obstructed,
-                x: 0,
-                y: 0,
-            },
-        };
-        match candidate_route.pipe {
-            Pipe::NorthSouth => return true,
-            Pipe::NorthEast | Pipe::NorthWest => found_a_north_pointing_pipe = true,
-            Pipe::SouthEast | Pipe::SouthWest => found_a_south_pointing_pipe = true,
-            _ => {}
-        }
-    }
-
-    found_a_north_pointing_pipe && found_a_south_pointing_pipe
-}
-fn is_surrounded_by_walls(
-    route: &Route,
-    loop_routes: &HashMap<String, &Route>,
-    non_loop_routes: &HashMap<String, &Route>,
-    route_matrix: &[Vec<Route>],
-) -> bool {
-    there_is_a_wall_above(route, loop_routes, non_loop_routes, route_matrix)
-        && there_is_a_wall_to_the_right(route, loop_routes, non_loop_routes, route_matrix)
-        && there_is_a_wall_below(route, loop_routes, non_loop_routes, route_matrix)
-        && there_is_a_wall_to_the_left(route, loop_routes, non_loop_routes, route_matrix)
-}
-
-fn reset_tiles_that_have_unsurrounded_neighbors(routes_conditions: &mut Vec<Vec<i32>>) {
-    let (mut x, mut y) = (-1, -1);
-    for (iy, conditions) in routes_conditions.iter_mut().enumerate() {
-        for (ix, condition) in conditions.iter_mut().enumerate() {
-            if condition == &NOT_SURROUNDED && (x, y) == (-1, -1) {
-                *condition = CHECKED;
-                (x, y) = (ix as i32, iy as i32);
-            }
-        }
-    }
-
-    if (x, y) == (-1, -1) {
-        return;
-    }
-
-    let (x, y) = (x as usize, y as usize);
-    let candidates_pos = [
-        (x, cmp::min(y + 1, routes_conditions.len() - 1)),
-        (cmp::min(x + 1, routes_conditions[0].len() - 1), y),
-        (x, y.saturating_sub(1)),
-        (x.saturating_sub(1), y),
-    ];
-
-    for (candidate_x, candidate_y) in candidates_pos {
-        if routes_conditions[candidate_y][candidate_x] == SURROUNDED {
-            routes_conditions[candidate_y][candidate_x] = NOT_SURROUNDED;
-        }
-    }
-
-    reset_tiles_that_have_unsurrounded_neighbors(routes_conditions);
-}
-
-fn get_key(x: usize, y: usize) -> String {
-    format!("x={x},y={y}")
-}
-
-fn count_tiles_inside_loop(route_matrix: &[Vec<Route>], starting_route: &Route) -> u32 {
-    let all_routes: HashMap<String, &Route> = route_matrix
-        .iter()
-        .flatten()
-        .map(|elem| {
-            let key = get_key(elem.x, elem.y);
-            (key, elem)
-        })
-        .collect();
-
-    let loop_routes: HashMap<String, &Route> = Navigator::new(route_matrix, starting_route)
-        .map(|elem| {
-            let key = get_key(elem.x, elem.y);
-            (key, elem)
-        })
-        .collect();
-
-    let non_loop_routes: HashMap<String, &Route> = all_routes
-        .into_iter()
-        .filter(|(key, _elem)| match loop_routes.get(key) {
-            Some(_value) => return false,
-            None => return true,
-        })
-        .collect();
-
-    let mut routes_conditions = vec![vec![-1; route_matrix[0].len()]; route_matrix.len()];
-    for (_, route) in &non_loop_routes {
-        if is_surrounded_by_walls(route, &loop_routes, &non_loop_routes, route_matrix, &routes_conditions) {
-            routes_conditions[route.y][route.x] = SURROUNDED;
-        } else {
-            routes_conditions[route.y][route.x] = NOT_SURROUNDED;
-        }
-    }
-
-    reset_tiles_that_have_unsurrounded_neighbors(&mut routes_conditions);
-    for (y, line) in routes_conditions.iter().enumerate().rev() {
-        for (x, condition) in line.iter().enumerate() {
-            if *condition == -1 {
-                let character = match route_matrix[y][x].pipe {
-                    Pipe::Start => 'S',
-                    Pipe::NorthSouth => '|',
-                    Pipe::NorthEast => 'L',
-                    Pipe::NorthWest => 'J',
-                    Pipe::SouthEast => 'F',
-                    Pipe::SouthWest => '7',
-                    Pipe::EastWest => '-',
-                    Pipe::Obstructed => '.',
-                };
-                print!("{}", character);
-            } else {
-                print!("{}", condition);
-            }
-        }
-        println!();
-    }
-
-    let mut count = 0;
-    for line in routes_conditions {
-        for condition in line {
-            if condition == SURROUNDED {
-                count += 1;
-            }
-        }
-    }
-    count
-}
-
-fn find_starting_route(route_matrix: &[Vec<Route>]) -> &Route {
-    route_matrix
-        .iter()
-        .flat_map(|row| row.iter())
-        .find(|&route| route.pipe == Pipe::Start)
-        .expect("Couldn't find starting position")
-}
-
-fn read_input_file() -> Vec<Vec<Route>> {
-    fs::read_to_string(FILE_PATH)
-        .expect("Couldn't read input file")
-        .lines()
-        .rev()
-        .enumerate()
-        .map(|(y, line)| {
-            line.chars()
-                .enumerate()
-                .map(|(x, ch)| Route {
-                    pipe: Pipe::from(ch),
-                    y,
-                    x,
-                })
-                .collect()
-        })
-        .collect()
-}
-
-fn main() {
-    let route_matrix = read_input_file();
-    let starting_position = find_starting_route(&route_matrix);
-    let steps_to_farthest_pipe = count_steps_to_farthest_pipe(&route_matrix, starting_position);
-    let tiles_inside_loop = count_tiles_inside_loop(&route_matrix, starting_position);
-    println!("Starting position: {:?}", starting_position);
-    println!("Steps to farthest pipe: {:?}", steps_to_farthest_pipe);
-    println!("Tiles inside loop: {:?}", tiles_inside_loop);
-}
