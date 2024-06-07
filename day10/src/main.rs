@@ -63,7 +63,7 @@ impl Pipe {
         }
     }
 
-    fn is_corner(&self) -> bool {
+    fn is_a_corner(&self) -> bool {
         match self.pipe_type {
             PipeType::NorthEast
             | PipeType::NorthWest
@@ -179,13 +179,13 @@ impl<'a> PlumpingNavigator<'a> {
 }
 
 impl<'a> Iterator for PlumpingNavigator<'a> {
-    type Item = Pipe;
+    type Item = &'a Pipe;
 
     fn next(&mut self) -> Option<Self::Item> {
         let neighbors = self.plumping.get_connected_neighbors_of(self.current_pipe);
 
         for neighbor in neighbors {
-            if neighbor == self.previous_pipe {
+            if (neighbor.x, neighbor.y) == (self.previous_pipe.x, self.previous_pipe.y) {
                 continue;
             }
             if self.current_pipe.pipe_type == PipeType::Start
@@ -195,26 +195,26 @@ impl<'a> Iterator for PlumpingNavigator<'a> {
             }
             self.previous_pipe = self.current_pipe;
             self.current_pipe = neighbor;
-            return Some(self.previous_pipe.clone());
+            return Some(self.previous_pipe);
         }
         None
     }
 }
 
 fn main() {
-    // const FILE_PATH: &str = "input.txt";
+    const FILE_PATH: &str = "input.txt";
     // const FILE_PATH: &str = "smaller_input.txt";
     // const FILE_PATH: &str = "smaller_input2.txt";
     // const FILE_PATH: &str = "smaller_input3.txt";
-    const FILE_PATH: &str = "smaller_input4.txt";
+    // const FILE_PATH: &str = "smaller_input4.txt";
 
     let plumping = read_input_file(FILE_PATH);
     let starting_pipe = find_starting_pipe(&plumping);
     let steps_to_farthest_pipe = count_steps_to_farthest_pipe(&plumping, starting_pipe);
-    let surrounded_pipes_count = count_pipes_surrounded_by_loop(&plumping, starting_pipe);
+    let pipes_on_each_side = count_pipes_on_each_side(&plumping, starting_pipe);
     println!("Starting position: {:?}", starting_pipe);
     println!("Steps to farthest pipe: {:?}", steps_to_farthest_pipe);
-    println!("Surrounded pipes count: {:?}", surrounded_pipes_count);
+    println!("Pipes on each side: {:?}", pipes_on_each_side);
 }
 
 fn read_input_file(file_path: &str) -> Plumping {
@@ -247,10 +247,10 @@ fn count_steps_to_farthest_pipe(plumping: &Plumping, starting_pipe: &Pipe) -> u3
     for _pipe in pipes {
         steps += 1;
     }
-    steps / 2 + 1
+    steps / 2
 }
 
-fn count_pipes_surrounded_by_loop(plumping: &Plumping, starting_pipe: &Pipe) -> (u32, u32) {
+fn count_pipes_on_each_side(plumping: &Plumping, starting_pipe: &Pipe) -> (u32, u32) {
     // After an extensive analysis, I discovered that the loop
     // bifurcates the map into two distinct sections: free and
     // surrounded. If a pipe contacts the loop on either side,
@@ -259,24 +259,20 @@ fn count_pipes_surrounded_by_loop(plumping: &Plumping, starting_pipe: &Pipe) -> 
     // the loop the pipe resides.
 
     let plumping = set_loop_pipes(&plumping, starting_pipe);
-    let (mut group1, mut group2) = separate_pipes_by_side(&plumping, starting_pipe);
-    println!(
-        "group1.len = {:?}, group2.len = {:?}",
-        group1.len(),
-        group2.len()
-    );
-    println!("{:?}", group2);
-    println!();
-    println!();
-    println!();
-    println!("{:?}", group1);
-    expand_group_to_catch_orphan_pipes(&plumping, &mut group1);
-    expand_group_to_catch_orphan_pipes(&plumping, &mut group2);
+    let group1 = get_items_of_one_of_the_sides(&plumping, starting_pipe);
+    let group1 = expand_group_to_catch_orphan_pipes(&plumping, &group1);
+
+    let mut group2 = Vec::new();
+    for pipe in plumping.pipes.values() {
+        if pipe.state != State::ComposingLoop && !group1.contains(&pipe) {
+            group2.push(pipe);
+        }
+    }
     (group1.len() as u32, group2.len() as u32)
 }
 
 fn set_loop_pipes(plumping: &Plumping, starting_pipe: &Pipe) -> Plumping {
-    let loop_pipes: Vec<Pipe> = PlumpingNavigator::new(&plumping, starting_pipe).collect();
+    let loop_pipes: Vec<&Pipe> = PlumpingNavigator::new(&plumping, starting_pipe).collect();
     let mut new_plumping = plumping.clone();
     for pipe in loop_pipes {
         new_plumping.insert_or_update(pipe.with_state(State::ComposingLoop));
@@ -284,112 +280,58 @@ fn set_loop_pipes(plumping: &Plumping, starting_pipe: &Pipe) -> Plumping {
     new_plumping
 }
 
-fn separate_pipes_by_side<'a>(
+fn get_items_of_one_of_the_sides<'a>(
     plumping: &'a Plumping,
     starting_pipe: &'a Pipe,
-) -> (Vec<Pipe>, Vec<Pipe>) {
+) -> Vec<&'a Pipe> {
     let mut loop_pipes = PlumpingNavigator::new(&plumping, starting_pipe).peekable();
+
     let mut side_1 = HashSet::new();
-    let mut side_2 = HashSet::new();
 
     while let Some(loop_pipe) = loop_pipes.next() {
         if let Some(next_pipe) = loop_pipes.peek() {
-            let side_1_direction = determine_side_1_direction(&loop_pipe, &next_pipe);
-            let neighbors = plumping.get_neighbors_of(&loop_pipe);
-            let next_neighbors = plumping.get_neighbors_of(&next_pipe);
-            let directions_towards_neighbors =
-                get_directions_towards_neighbors(&neighbors, &loop_pipe);
-
-            if loop_pipe.is_corner() {
-                // println!("loop_pipe: {:?}", loop_pipe);
-                // println!("next_pipe: {:?}", next_pipe);
-                // println!("side direction: {:?}", side_1_direction);
-                if directions_towards_neighbors.iter().any(|(_, direction)| direction == &side_1_direction) {
-                    for (neighbor, _) in directions_towards_neighbors {
-                        side_1.insert(neighbor.clone());
-                        // println!("neighbor: {:?}", neighbor);
-                        // println!("Inserted");
+            if loop_pipe.is_a_corner() {
+                if should_insert_neighbors(&loop_pipe, &next_pipe) {
+                    let neighbors = plumping.get_neighbors_of(&loop_pipe);
+                    let neighbors = neighbors
+                        .iter()
+                        .filter(|pipe| pipe.state != State::ComposingLoop);
+                    for neighbor in neighbors {
+                        side_1.insert(*neighbor);
                     }
                 }
-                // } else {
-                //     for (neighbor, _) in directions_towards_neighbors {
-                //         side_2.insert(neighbor.clone());
-                //         println!("neighbor: {:?}", neighbor);
-                //         println!("Inserted2");
-                //     }
-                // }
-                continue;
-            }
-            for (neighbor, direction) in directions_towards_neighbors {
-                if loop_pipe.pipe_type != PipeType::Start {
-                    // println!("loop_pipe: {:?}", loop_pipe);
-                    // println!("next_pipe: {:?}", next_pipe);
-                    // println!("neighbor: {:?}", neighbor);
-                    // println!("side direction: {:?}", side_1_direction);
-                    // println!("neighbor_direction: {:?}", direction);
-                    if direction == side_1_direction {
-                        if !side_2.contains(neighbor) {
-                            side_1.insert(neighbor.clone());
-                            // println!("Inserted");
-                        }
-                    } else {
-                        if !side_1.contains(neighbor) {
-                            side_2.insert(neighbor.clone());
-                            // println!("Inserted2");
-                        }
-                    }
-                    // println!();
-                    // println!();
-                }
-
-                // let directions_towards_next_neighbors =
-                //     get_directions_towards_neighbors(&next_neighbors, &next_pipe);
-                // for (neighbor, direction) in directions_towards_next_neighbors {
-                //     if direction == side_1_direction {
-                //         side_1.insert(neighbor.clone());
-                //     }
-                // }
             }
         }
     }
-    (Vec::from_iter(side_1), Vec::from_iter(side_2))
+
+    Vec::from_iter(side_1)
 }
 
-fn determine_side_1_direction(current_loop_pipe: &Pipe, next_loop_pipe: &Pipe) -> Direction {
-    let side_1_direction = match current_loop_pipe.get_direction_towards(next_loop_pipe) {
-        Direction::Above => Direction::Left,
-        Direction::Right => Direction::Above,
-        Direction::Below => Direction::Right,
-        Direction::Left => Direction::Below,
-        _ => panic!("Unknown direction"),
-    };
-    side_1_direction
+fn should_insert_neighbors(current_loop_pipe: &Pipe, next_loop_pipe: &Pipe) -> bool {
+    let direction_towards_next_pipe = current_loop_pipe.get_direction_towards(next_loop_pipe);
+
+    match (direction_towards_next_pipe, current_loop_pipe.pipe_type) {
+        (Direction::Above, PipeType::NorthEast)
+        | (Direction::Left, PipeType::NorthWest)
+        | (Direction::Right, PipeType::SouthEast)
+        | (Direction::Below, PipeType::SouthWest) => true,
+        _ => false,
+    }
 }
 
-fn get_directions_towards_neighbors<'a>(
-    neighbors: &'a Vec<&Pipe>,
-    pipe: &Pipe,
-) -> Vec<(&'a Pipe, Direction)> {
-    let directions_towards_neighbors = neighbors
-        .iter()
-        .filter(|neighbor| neighbor.state != State::ComposingLoop)
-        .map(|&neighbor| {
-            let direction = pipe.get_direction_towards(neighbor);
-            (neighbor, direction)
-        })
-        .collect();
-    directions_towards_neighbors
-}
-
-fn expand_group_to_catch_orphan_pipes<'a>(plumping: &'a Plumping, group: &mut Vec<Pipe>) {
-    let mut queue: VecDeque<Pipe> = VecDeque::new();
-    let mut visited: HashSet<Pipe> = HashSet::new();
+fn expand_group_to_catch_orphan_pipes<'a>(
+    plumping: &'a Plumping,
+    group: &'a Vec<&'a Pipe>,
+) -> Vec<&'a Pipe> {
+    let mut queue: VecDeque<&Pipe> = VecDeque::new();
+    let mut visited: HashSet<&Pipe> = HashSet::new();
 
     for pipe in group.iter() {
-        queue.push_back(pipe.clone());
-        visited.insert(pipe.clone());
+        queue.push_back(pipe);
+        visited.insert(pipe);
     }
 
+    let mut new_group = group.clone();
     while let Some(pipe) = queue.pop_front() {
         let neighbors = plumping.get_neighbors_of(&pipe);
         let neighbors = neighbors
@@ -397,10 +339,12 @@ fn expand_group_to_catch_orphan_pipes<'a>(plumping: &'a Plumping, group: &mut Ve
             .filter(|neighbor| neighbor.state != State::ComposingLoop);
 
         for &neighbor in neighbors {
-            if visited.insert(neighbor.clone()) {
-                queue.push_back(neighbor.clone());
-                group.push(neighbor.clone());
+            if visited.insert(neighbor) {
+                queue.push_back(neighbor);
+                new_group.push(neighbor);
             }
         }
     }
+
+    new_group
 }
