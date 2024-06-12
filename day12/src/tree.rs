@@ -1,5 +1,4 @@
 pub type GroupLenghts = Vec<u8>;
-pub type SpringConditions = Vec<SpringCondition>;
 
 #[derive(Clone, Debug)]
 pub enum SpringCondition {
@@ -21,8 +20,6 @@ impl SpringCondition {
 
 #[derive(Clone, Debug)]
 pub struct Node {
-    pub spring_conditions: SpringConditions,
-    pub group_lengths: GroupLenghts,
     left: Option<Box<Node>>,
     right: Option<Box<Node>>,
 }
@@ -30,105 +27,177 @@ pub struct Node {
 impl Node {
     pub fn new() -> Node {
         Node {
-            spring_conditions: vec![SpringCondition::Operational],
-            group_lengths: GroupLenghts::new(),
             left: None,
             right: None,
         }
     }
 
-    pub fn insert(&mut self, condition: SpringCondition) {
-        match condition {
-            SpringCondition::Operational => self._add_condition_to_leaves(&condition),
-            SpringCondition::Damaged => self._add_condition_to_leaves(&condition),
-            SpringCondition::Unknown => self._add_level(),
-        }
+    pub fn insert(&mut self, conditions: &[SpringCondition], group_lengths: GroupLenghts) -> u32 {
+        self._insert(
+            conditions,
+            group_lengths,
+            &SpringCondition::Operational,
+            Vec::new(),
+            0,
+        )
     }
 
-    fn _add_condition_to_leaves(&mut self, new_condition: &SpringCondition) {
-        if self._is_leaf() {
-            self._update_group_lengths(new_condition);
-            self.spring_conditions.push(new_condition.clone());
-        } else {
-            self.left
-                .as_mut()
-                .unwrap()
-                ._add_condition_to_leaves(new_condition);
-            self.right
-                .as_mut()
-                .unwrap()
-                ._add_condition_to_leaves(new_condition);
+    pub fn _insert(
+        &mut self,
+        conditions: &[SpringCondition],
+        expected_group_lengths: GroupLenghts,
+        previous_condition: &SpringCondition,
+        current_group_lengths: GroupLenghts,
+        current_count: u32,
+    ) -> u32 {
+        let mut new_count = current_count;
+        if conditions.len() == 0 && current_group_lengths.eq(&expected_group_lengths) {
+            new_count += 1;
         }
-    }
-
-    fn _update_group_lengths(&mut self, new_condition: &SpringCondition) {
-        let condition = self
-            .spring_conditions
-            .last()
-            .unwrap_or(&SpringCondition::Operational);
-        match (condition, new_condition) {
-            (_, SpringCondition::Operational) => {}
-            (SpringCondition::Operational, SpringCondition::Damaged) => self.group_lengths.push(1),
-            (SpringCondition::Damaged, SpringCondition::Damaged) => {
-                match self.group_lengths.last_mut() {
-                    Some(group_length) => *group_length += 1,
-                    None => self.group_lengths.push(1),
+        if let Some(current_condition) = conditions.first() {
+            match (previous_condition, current_condition) {
+                (_, SpringCondition::Operational) => {
+                    new_count += self._insert_left(
+                        conditions,
+                        expected_group_lengths,
+                        current_condition,
+                        current_group_lengths,
+                        current_count,
+                    );
                 }
-            }
-            _ => panic!("Invalid spring conditions"),
-        }
-    }
-
-    fn _add_level(&mut self) {
-        if self._is_leaf() {
-            let left_node = Node::_make_son_of(&self, SpringCondition::Operational);
-            let mut right_node = Node::_make_son_of(&self, SpringCondition::Damaged);
-
-            match self.spring_conditions.last().unwrap() {
-                SpringCondition::Operational => {
-                    right_node.group_lengths.push(1);
+                (SpringCondition::Operational, SpringCondition::Damaged) => {
+                    new_count += self._insert_right_pushing_new_group_length(
+                        conditions,
+                        expected_group_lengths,
+                        current_condition,
+                        current_group_lengths,
+                        current_count,
+                    );
                 }
-                SpringCondition::Damaged => match right_node.group_lengths.last_mut() {
-                    Some(group_length) => *group_length += 1,
-                    None => right_node.group_lengths.push(1),
-                },
-                _ => panic!("Node with invalid spring condition"),
-            }
+                (SpringCondition::Operational, SpringCondition::Unknown) => {
+                    new_count += self._insert_left(
+                        conditions,
+                        expected_group_lengths.clone(),
+                        &SpringCondition::Operational,
+                        current_group_lengths.clone(),
+                        current_count,
+                    );
+                    new_count += self._insert_right_pushing_new_group_length(
+                        conditions,
+                        expected_group_lengths,
+                        &SpringCondition::Damaged,
+                        current_group_lengths,
+                        current_count,
+                    );
+                }
+                (SpringCondition::Damaged, SpringCondition::Damaged) => {
+                    new_count += self._insert_right_incrementing_last_group_length(
+                        conditions,
+                        expected_group_lengths,
+                        current_condition,
+                        current_group_lengths,
+                        current_count,
+                    );
+                }
+                (SpringCondition::Damaged, SpringCondition::Unknown) => {
+                    new_count += self._insert_left(
+                        conditions,
+                        expected_group_lengths.clone(),
+                        &SpringCondition::Operational,
+                        current_group_lengths.clone(),
+                        current_count,
+                    );
+                    new_count += self._insert_right_incrementing_last_group_length(
+                        conditions,
+                        expected_group_lengths,
+                        &SpringCondition::Damaged,
+                        current_group_lengths,
+                        current_count,
+                    );
+                }
 
-            self.left = Some(Box::new(left_node));
-            self.right = Some(Box::new(right_node));
-        } else {
-            self.left.as_mut().unwrap()._add_level();
-            self.right.as_mut().unwrap()._add_level();
+                _ => panic!("Invalid condition"),
+            }
         }
+        new_count
     }
 
-    fn _make_son_of(node: &Node, spring_condition: SpringCondition) -> Node {
-        Node {
-            spring_conditions: vec![spring_condition],
-            group_lengths: node.group_lengths.clone(),
-            left: None,
-            right: None,
+    fn _insert_left(
+        &mut self,
+        conditions: &[SpringCondition],
+        expected_group_lengths: GroupLenghts,
+        current_condition: &SpringCondition,
+        current_group_lengths: GroupLenghts,
+        current_count: u32,
+    ) -> u32 {
+        let mut count = 0;
+        if self.left.is_none() {
+            self.left = Some(Box::new(Node::new()));
         }
+        if let Some(left_node) = self.left.as_mut() {
+            count = left_node._insert(
+                &conditions[1..],
+                expected_group_lengths,
+                current_condition,
+                current_group_lengths,
+                current_count,
+            );
+        }
+        count
     }
 
-    pub fn get_leaves(&self) -> Vec<Node> {
-        self._get_leaves(Vec::new())
+    fn _insert_right_pushing_new_group_length(
+        &mut self,
+        conditions: &[SpringCondition],
+        expected_group_lengths: GroupLenghts,
+        current_condition: &SpringCondition,
+        mut current_group_lengths: GroupLenghts,
+        current_count: u32,
+    ) -> u32 {
+        let mut count = 0;
+        if self.right.is_none() {
+            self.right = Some(Box::new(Node::new()));
+        }
+        if let Some(right_node) = self.right.as_mut() {
+            current_group_lengths.push(1);
+            count = right_node._insert(
+                &conditions[1..],
+                expected_group_lengths,
+                current_condition,
+                current_group_lengths,
+                current_count,
+            );
+        }
+        count
     }
 
-    fn _get_leaves<'a>(&'a self, leaves: Vec<Node>) -> Vec<Node> {
-        let mut new_leaves = leaves.clone();
-        if self._is_leaf() {
-            new_leaves.push(self.clone());
-        } else {
-            if let Some(ref left) = self.left {
-                new_leaves.extend(left._get_leaves(leaves.clone()));
-            }
-            if let Some(ref right) = self.right {
-                new_leaves.extend(right._get_leaves(leaves.clone()));
-            }
+    fn _insert_right_incrementing_last_group_length(
+        &mut self,
+        conditions: &[SpringCondition],
+        expected_group_lengths: GroupLenghts,
+        current_condition: &SpringCondition,
+        mut current_group_lengths: GroupLenghts,
+        current_count: u32,
+    ) -> u32 {
+        let mut count = 0;
+        if self.right.is_none() {
+            self.right = Some(Box::new(Node::new()));
         }
-        new_leaves
+        if let Some(right_node) = self.right.as_mut() {
+            if let Some(group_length) = current_group_lengths.last_mut() {
+                *group_length += 1;
+            } else {
+                current_group_lengths.push(1);
+            }
+            count = right_node._insert(
+                &conditions[1..],
+                expected_group_lengths,
+                current_condition,
+                current_group_lengths,
+                current_count,
+            );
+        }
+        count
     }
 
     fn _is_leaf(&self) -> bool {
